@@ -95,12 +95,25 @@
   <footer class="sticky bottom-0 z-50 bg-gray-950/90 backdrop-blur-md border-t border-gray-800/60 px-4 py-3 flex items-center justify-center gap-3"
           style="padding-bottom: max(12px, env(safe-area-inset-bottom))">
     <span id="hint-text" class="text-xs text-gray-500 hidden">사진을 탭하여 선택 후 다른 액자를 탭하면 교체</span>
-    <button id="download-btn"
-            class="bg-gray-800 hover:bg-gray-700 active:scale-95 text-gold-400 border border-gold-500/30 px-6 py-2.5 rounded-full text-sm font-medium transition-all disabled:opacity-30 disabled:pointer-events-none"
-            disabled>
-      앨범 저장하기
+    <button id="add-page-btn"
+            class="bg-gray-800 hover:bg-gray-700 active:scale-95 text-gold-400 border border-gold-500/30 px-6 py-2.5 rounded-full text-sm font-medium transition-all">
+      앨범 페이지 추가하기
     </button>
   </footer>
+
+  <!-- Frame Picker -->
+  <div id="frame-picker" class="fixed inset-0 z-[100] hidden">
+    <div class="absolute inset-0 bg-black/50" id="picker-backdrop"></div>
+    <div class="absolute bottom-0 left-0 right-0 bg-gray-900 rounded-t-2xl" style="padding-bottom: max(20px, env(safe-area-inset-bottom))">
+      <div class="w-10 h-1 bg-gray-600 rounded-full mx-auto mt-3 mb-4"></div>
+      <p class="text-center text-gray-400 text-sm mb-4">추가할 페이지를 선택하세요</p>
+      <div class="flex flex-col gap-3 px-5 pb-4">
+        <button data-template="0" class="picker-opt bg-gray-800 hover:bg-gray-700 active:scale-[0.98] text-white py-3.5 rounded-xl text-sm font-medium transition-all border border-gray-700">액자 1개</button>
+        <button data-template="1" class="picker-opt bg-gray-800 hover:bg-gray-700 active:scale-[0.98] text-white py-3.5 rounded-xl text-sm font-medium transition-all border border-gray-700">액자 2개</button>
+        <button data-template="2" class="picker-opt bg-gray-800 hover:bg-gray-700 active:scale-[0.98] text-white py-3.5 rounded-xl text-sm font-medium transition-all border border-gray-700">액자 3개</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Hidden file inputs -->
   <input type="file" id="file-input" accept="image/*" multiple hidden>
@@ -115,7 +128,14 @@
 // ========================================
 // Configuration
 // ========================================
-const FRAMES = [
+const FRAME_TEMPLATES = [
+  {
+    src: 'album_images/u9138982156_technical_flat_front_elevation_view_perfectly_strai_91d7e992-9a33-49b8-8d7e-2ca1113428b1.webp',
+    width: 2592, height: 1824,
+    regions: [
+      { x: 943, y: 532, w: 569, h: 808 },
+    ]
+  },
   {
     src: 'album_images/u9138982156_technical_flat_front_elevation_view_perfectly_strai_5f847c61-c36d-499c-8cec-331b46d0fbce.webp',
     width: 2592, height: 1824,
@@ -135,15 +155,19 @@ const FRAMES = [
   }
 ];
 
-const TOTAL_SLOTS = FRAMES.reduce((s, f) => s + f.regions.length, 0);
+let pages = [0, 1, 2]; // indices into FRAME_TEMPLATES
+
+function getTotalSlots() {
+  return pages.reduce((s, pi) => s + FRAME_TEMPLATES[pi].regions.length, 0);
+}
 
 // ========================================
 // State
 // ========================================
-let photos = new Array(TOTAL_SLOTS).fill(null); // Image objects
-let photoURLs = new Array(TOTAL_SLOTS).fill(null); // Display URLs
+let photos = [];
+let photoURLs = [];
 let selectedSlot = -1;
-let frameImages = []; // Loaded frame Image objects
+let frameImages = []; // Loaded frame Image objects (one per template)
 
 // ========================================
 // Helpers
@@ -182,7 +206,8 @@ function renderAlbum() {
   album.innerHTML = '';
 
   let slotOffset = 0;
-  FRAMES.forEach((frame, fi) => {
+  pages.forEach((templateIdx, pi) => {
+    const frame = FRAME_TEMPLATES[templateIdx];
     const page = document.createElement('div');
     page.className = 'relative w-full rounded-xl overflow-hidden shadow-2xl animate-in';
     page.style.aspectRatio = `${frame.width} / ${frame.height}`;
@@ -211,6 +236,16 @@ function renderAlbum() {
     overlay.draggable = false;
     page.appendChild(overlay);
 
+    // Delete page button
+    const delBtn = document.createElement('button');
+    delBtn.className = 'absolute top-2 right-2 z-10 bg-black/50 hover:bg-black/70 active:scale-90 text-white/70 hover:text-white w-8 h-8 rounded-full flex items-center justify-center transition-all backdrop-blur-sm';
+    delBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>';
+    delBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removePage(pi);
+    });
+    page.appendChild(delBtn);
+
     album.appendChild(page);
     slotOffset += frame.regions.length;
   });
@@ -235,25 +270,20 @@ function refreshSlot(slot) {
 }
 
 function refreshAllSlots() {
-  for (let i = 0; i < TOTAL_SLOTS; i++) refreshSlot(i);
-  updateDownloadBtn();
-}
-
-function updateDownloadBtn() {
-  const hasAny = photos.some(p => p !== null);
-  document.getElementById('download-btn').disabled = !hasAny;
+  for (let i = 0; i < getTotalSlots(); i++) refreshSlot(i);
 }
 
 // ========================================
 // Photo Upload
 // ========================================
 async function handleUpload(fileList) {
-  const files = Array.from(fileList).slice(0, TOTAL_SLOTS);
+  const total = getTotalSlots();
+  const files = Array.from(fileList).slice(0, total);
   let nextEmpty = 0;
 
   for (const file of files) {
-    while (nextEmpty < TOTAL_SLOTS && photos[nextEmpty]) nextEmpty++;
-    if (nextEmpty >= TOTAL_SLOTS) break;
+    while (nextEmpty < total && photos[nextEmpty]) nextEmpty++;
+    if (nextEmpty >= total) break;
 
     try {
       const { img, url } = await loadImageFromFile(file);
@@ -265,7 +295,6 @@ async function handleUpload(fileList) {
       console.error('Failed to load:', file.name, e);
     }
   }
-  updateDownloadBtn();
   document.getElementById('hint-text').classList.remove('hidden');
 }
 
@@ -405,7 +434,7 @@ function startDrag(slot, x, y) {
 
   // Dim source, highlight targets
   document.getElementById(`slot-${slot}`).style.opacity = '0.4';
-  for (let i = 0; i < TOTAL_SLOTS; i++) {
+  for (let i = 0; i < getTotalSlots(); i++) {
     if (i !== slot) {
       document.getElementById(`slot-${i}`).classList.add('drop-target');
     }
@@ -438,7 +467,7 @@ function endDrag(x, y) {
 
   // Clean up
   document.getElementById(`slot-${dragState.slot}`).style.opacity = '';
-  for (let i = 0; i < TOTAL_SLOTS; i++) {
+  for (let i = 0; i < getTotalSlots(); i++) {
     document.getElementById(`slot-${i}`).classList.remove('drop-target');
   }
   dragState = null;
@@ -459,16 +488,10 @@ function drawCoverFit(ctx, img, x, y, w, h) {
 }
 
 async function downloadAll() {
-  const btn = document.getElementById('download-btn');
-  btn.disabled = true;
-  const origText = btn.textContent;
-  btn.textContent = '저장 중...';
-
   let slotOffset = 0;
-  for (let fi = 0; fi < FRAMES.length; fi++) {
-    const frame = FRAMES[fi];
+  for (let pi = 0; pi < pages.length; pi++) {
+    const frame = FRAME_TEMPLATES[pages[pi]];
 
-    // Check if this page has any photos
     const pagePhotos = photos.slice(slotOffset, slotOffset + frame.regions.length);
     if (!pagePhotos.some(p => p !== null)) {
       slotOffset += frame.regions.length;
@@ -480,11 +503,9 @@ async function downloadAll() {
     canvas.height = frame.height;
     const ctx = canvas.getContext('2d');
 
-    // White background
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw photos
     for (let i = 0; i < frame.regions.length; i++) {
       const photo = photos[slotOffset + i];
       if (!photo) continue;
@@ -492,15 +513,13 @@ async function downloadAll() {
       drawCoverFit(ctx, photo, r.x, r.y, r.w, r.h);
     }
 
-    // Draw frame on top
-    ctx.drawImage(frameImages[fi], 0, 0);
+    ctx.drawImage(frameImages[pages[pi]], 0, 0);
 
-    // Download
     const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `epilogue_album_page${fi + 1}.png`;
+    a.download = `epilogue_album_page${pi + 1}.png`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -509,9 +528,48 @@ async function downloadAll() {
     slotOffset += frame.regions.length;
     await new Promise(r => setTimeout(r, 500));
   }
+}
 
-  btn.textContent = origText;
-  btn.disabled = false;
+// ========================================
+// Page Management
+// ========================================
+function removePage(pageIdx) {
+  // Calculate slot offset for this page
+  let slotOffset = 0;
+  for (let i = 0; i < pageIdx; i++) slotOffset += FRAME_TEMPLATES[pages[i]].regions.length;
+  const numSlots = FRAME_TEMPLATES[pages[pageIdx]].regions.length;
+
+  // Remove page and its photo data
+  pages.splice(pageIdx, 1);
+  photos.splice(slotOffset, numSlots);
+  photoURLs.splice(slotOffset, numSlots);
+
+  // Clear selection
+  selectedSlot = -1;
+
+  renderAlbum();
+}
+
+function addPage(templateIdx) {
+  pages.push(templateIdx);
+  const numSlots = FRAME_TEMPLATES[templateIdx].regions.length;
+  for (let i = 0; i < numSlots; i++) {
+    photos.push(null);
+    photoURLs.push(null);
+  }
+  renderAlbum();
+  setTimeout(() => {
+    const album = document.getElementById('album');
+    album.lastElementChild.scrollIntoView({ behavior: 'smooth' });
+  }, 100);
+}
+
+function showPicker() {
+  document.getElementById('frame-picker').classList.remove('hidden');
+}
+
+function hidePicker() {
+  document.getElementById('frame-picker').classList.add('hidden');
 }
 
 // ========================================
@@ -519,11 +577,16 @@ async function downloadAll() {
 // ========================================
 async function init() {
   try {
-    // Preload frame images
-    for (const frame of FRAMES) {
-      const img = await loadImage(frame.src);
+    // Preload frame template images
+    for (const tmpl of FRAME_TEMPLATES) {
+      const img = await loadImage(tmpl.src);
       frameImages.push(img);
     }
+
+    // Initialize photo arrays for default pages
+    const total = getTotalSlots();
+    photos = new Array(total).fill(null);
+    photoURLs = new Array(total).fill(null);
 
     renderAlbum();
 
@@ -543,11 +606,20 @@ async function init() {
     document.addEventListener('click', (e) => {
       if (selectedSlot === -1) return;
       if (e.target.closest('.frame-zone')) return;
+      if (e.target.closest('#frame-picker')) return;
       document.getElementById(`slot-${selectedSlot}`).classList.remove('selected');
       selectedSlot = -1;
     });
 
-    document.getElementById('download-btn').addEventListener('click', downloadAll);
+    // Add page button & picker
+    document.getElementById('add-page-btn').addEventListener('click', showPicker);
+    document.getElementById('picker-backdrop').addEventListener('click', hidePicker);
+    document.querySelectorAll('.picker-opt').forEach(btn => {
+      btn.addEventListener('click', () => {
+        addPage(parseInt(btn.dataset.template));
+        hidePicker();
+      });
+    });
 
     // Single file upload for individual slot
     document.getElementById('single-file-input').addEventListener('change', async (e) => {
@@ -557,7 +629,6 @@ async function init() {
           photos[pendingSlot] = img;
           photoURLs[pendingSlot] = url;
           refreshSlot(pendingSlot);
-          updateDownloadBtn();
           document.getElementById('hint-text').classList.remove('hidden');
         } catch (err) {
           console.error('Failed to load:', err);
