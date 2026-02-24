@@ -1,0 +1,13 @@
+result/
+test_images/
+__pycache__/
+*.pyc
+.DS_Store
+composite.py
+composite_alpha.py
+detect_frames.py
+grid_overlay.py
+zoom_frames.py
+test_all.py
+test_all_pairs.py
+album_images/thumbs/

@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Epilogue Album</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { gold: { 400: '#d4a853', 500: '#c4a35a', 600: '#a8872e' } }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { overscroll-behavior: none; }
+    .frame-zone {
+      position: absolute;
+      overflow: hidden;
+      z-index: 1;
+      transition: box-shadow 0.25s, transform 0.25s, filter 0.25s;
+    }
+    .frame-zone.selected {
+      box-shadow: 0 0 0 4px rgba(212, 168, 83, 1), 0 0 20px rgba(212, 168, 83, 0.6);
+      transform: scale(1.12);
+      z-index: 8 !important;
+      filter: brightness(1.15);
+    }
+    .frame-zone.drop-target {
+      box-shadow: 0 0 0 3px rgba(212, 168, 83, 0.5);
+    }
+    .frame-zone img.photo {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      pointer-events: none;
+      display: block;
+    }
+    .frame-overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 5;
+    }
+    .drag-ghost {
+      position: fixed;
+      pointer-events: none;
+      z-index: 1000;
+      opacity: 0.85;
+      transform: translate(-50%, -50%) scale(0.5);
+      border-radius: 8px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+      transition: opacity 0.15s;
+    }
+    .placeholder-icon {
+      width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.25);
+      backdrop-filter: blur(2px);
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+    .animate-in { animation: fadeIn 0.3s ease-out; }
+    @keyframes toastIn { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+    @keyframes toastOut { from { opacity: 1; transform: translate(-50%, 0); } to { opacity: 0; transform: translate(-50%, -10px); } }
+    .toast {
+      position: fixed; left: 50%; z-index: 200;
+      transform: translateX(-50%);
+      animation: toastIn 0.25s ease-out;
+    }
+    .toast.hide { animation: toastOut 0.25s ease-in forwards; }
+  </style>
+</head>
+<body class="bg-gray-950 min-h-screen flex flex-col select-none">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-50 bg-gray-950/90 backdrop-blur-md border-b border-gray-800/60 px-4 py-3 flex items-center justify-between"
+          style="padding-top: max(12px, env(safe-area-inset-top))">
+    <h1 class="text-lg font-semibold text-gold-400 tracking-widest">Epilogue Album</h1>
+    <button id="upload-btn"
+            class="bg-gold-500 hover:bg-gold-600 active:scale-95 text-white px-4 py-2 rounded-full text-sm font-medium transition-all shadow-lg shadow-gold-500/20">
+      한번에 모두 올리기
+    </button>
+  </header>
+
+  <!-- Album Pages -->
+  <main id="album" class="flex-1 overflow-y-auto px-4 py-5 space-y-5">
+    <p id="loading-msg" class="text-center text-gray-500 py-20">로딩 중...</p>
+  </main>
+
+  <!-- Footer -->
+  <footer class="sticky bottom-0 z-50 bg-gray-950/90 backdrop-blur-md border-t border-gray-800/60 px-4 py-3 flex items-center justify-center gap-3"
+          style="padding-bottom: max(12px, env(safe-area-inset-bottom))">
+    <span id="hint-text" class="text-xs text-gray-500 hidden">사진을 탭하여 선택 후 다른 액자를 탭하면 교체</span>
+    <button id="download-btn"
+            class="bg-gray-800 hover:bg-gray-700 active:scale-95 text-gold-400 border border-gold-500/30 px-6 py-2.5 rounded-full text-sm font-medium transition-all disabled:opacity-30 disabled:pointer-events-none"
+            disabled>
+      앨범 저장하기
+    </button>
+  </footer>
+
+  <!-- Hidden file inputs -->
+  <input type="file" id="file-input" accept="image/*" multiple hidden>
+  <input type="file" id="single-file-input" accept="image/*" hidden>
+
+  <!-- Drag ghost -->
+  <div id="drag-ghost" class="drag-ghost hidden">
+    <img class="w-24 h-24 object-cover rounded-lg">
+  </div>
+
+<script>
+// ========================================
+// Configuration
+// ========================================
+const FRAMES = [
+  {
+    src: 'album_images/u9138982156_technical_flat_front_elevation_view_perfectly_strai_5f847c61-c36d-499c-8cec-331b46d0fbce.png',
+    width: 2592, height: 1824,
+    regions: [
+      { x: 830, y: 815, w: 335, h: 499 },
+      { x: 1506, y: 968, w: 300, h: 370 },
+    ]
+  },
+  {
+    src: 'album_images/u9138982156_technical_flat_front_elevation_view_perfectly_strai_3b45b181-f6a9-4a0d-88a4-651f071943ad.png',
+    width: 2592, height: 1824,
+    regions: [
+      { x: 407, y: 772, w: 274, h: 426 },
+      { x: 1078, y: 663, w: 287, h: 450 },
+      { x: 1793, y: 779, w: 261, h: 434 },
+    ]
+  }
+];
+
+const TOTAL_SLOTS = FRAMES.reduce((s, f) => s + f.regions.length, 0);
+
+// ========================================
+// State
+// ========================================
+let photos = new Array(TOTAL_SLOTS).fill(null); // Image objects
+let photoURLs = new Array(TOTAL_SLOTS).fill(null); // Display URLs
+let selectedSlot = -1;
+let frameImages = []; // Loaded frame Image objects
+
+// ========================================
+// Helpers
+// ========================================
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => resolve({ img, url });
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+function getGlobalSlotIndex(frameIdx, regionIdx) {
+  let offset = 0;
+  for (let i = 0; i < frameIdx; i++) offset += FRAMES[i].regions.length;
+  return offset + regionIdx;
+}
+
+// ========================================
+// UI Rendering
+// ========================================
+function renderAlbum() {
+  const album = document.getElementById('album');
+  album.innerHTML = '';
+
+  let slotOffset = 0;
+  FRAMES.forEach((frame, fi) => {
+    const page = document.createElement('div');
+    page.className = 'relative w-full rounded-xl overflow-hidden shadow-2xl animate-in';
+    page.style.aspectRatio = `${frame.width} / ${frame.height}`;
+
+    // Frame zones (behind)
+    frame.regions.forEach((region, ri) => {
+      const slot = slotOffset + ri;
+      const zone = document.createElement('div');
+      zone.className = 'frame-zone cursor-pointer';
+      zone.id = `slot-${slot}`;
+      zone.dataset.slot = slot;
+      zone.style.left = `${(region.x / frame.width * 100).toFixed(3)}%`;
+      zone.style.top = `${(region.y / frame.height * 100).toFixed(3)}%`;
+      zone.style.width = `${(region.w / frame.width * 100).toFixed(3)}%`;
+      zone.style.height = `${(region.h / frame.height * 100).toFixed(3)}%`;
+
+      renderSlotContent(zone, slot);
+      setupSlotInteraction(zone, slot);
+      page.appendChild(zone);
+    });
+
+    // Frame overlay (on top, transparent cutouts reveal photos)
+    const overlay = document.createElement('img');
+    overlay.src = frame.src;
+    overlay.className = 'frame-overlay';
+    overlay.draggable = false;
+    page.appendChild(overlay);
+
+    album.appendChild(page);
+    slotOffset += frame.regions.length;
+  });
+}
+
+function renderSlotContent(zone, slot) {
+  if (photos[slot]) {
+    zone.innerHTML = `<img class="photo" src="${photoURLs[slot]}" draggable="false">`;
+  } else {
+    zone.innerHTML = `
+      <div class="placeholder-icon">
+        <svg class="w-8 h-8 text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4.5v15m7.5-7.5h-15"/>
+        </svg>
+      </div>`;
+  }
+}
+
+function refreshSlot(slot) {
+  const zone = document.getElementById(`slot-${slot}`);
+  if (zone) renderSlotContent(zone, slot);
+}
+
+function refreshAllSlots() {
+  for (let i = 0; i < TOTAL_SLOTS; i++) refreshSlot(i);
+  updateDownloadBtn();
+}
+
+function updateDownloadBtn() {
+  const hasAny = photos.some(p => p !== null);
+  document.getElementById('download-btn').disabled = !hasAny;
+}
+
+// ========================================
+// Photo Upload
+// ========================================
+async function handleUpload(fileList) {
+  const files = Array.from(fileList).slice(0, TOTAL_SLOTS);
+  let nextEmpty = 0;
+
+  for (const file of files) {
+    while (nextEmpty < TOTAL_SLOTS && photos[nextEmpty]) nextEmpty++;
+    if (nextEmpty >= TOTAL_SLOTS) break;
+
+    try {
+      const { img, url } = await loadImageFromFile(file);
+      photos[nextEmpty] = img;
+      photoURLs[nextEmpty] = url;
+      refreshSlot(nextEmpty);
+      nextEmpty++;
+    } catch (e) {
+      console.error('Failed to load:', file.name, e);
+    }
+  }
+  updateDownloadBtn();
+  document.getElementById('hint-text').classList.remove('hidden');
+}
+
+// ========================================
+// Slot Interaction (Tap to select + swap, Drag to swap)
+// ========================================
+function setupSlotInteraction(zone, slot) {
+  let touchStartTime = 0;
+  let touchStartX = 0, touchStartY = 0;
+  let isDragging = false;
+  let dragTimer = null;
+
+  // --- Touch handlers ---
+  zone.addEventListener('touchstart', (e) => {
+    touchStartTime = Date.now();
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    isDragging = false;
+
+    if (photos[slot]) {
+      dragTimer = setTimeout(() => {
+        isDragging = true;
+        startDrag(slot, touchStartX, touchStartY);
+        if (navigator.vibrate) navigator.vibrate(30);
+      }, 250);
+    }
+  }, { passive: true });
+
+  zone.addEventListener('touchmove', (e) => {
+    const dx = e.touches[0].clientX - touchStartX;
+    const dy = e.touches[0].clientY - touchStartY;
+
+    if (!isDragging && Math.sqrt(dx*dx + dy*dy) > 10) {
+      clearTimeout(dragTimer);
+    }
+
+    if (isDragging) {
+      e.preventDefault();
+      moveDrag(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  }, { passive: false });
+
+  let touchHandled = false;
+  zone.addEventListener('touchend', (e) => {
+    clearTimeout(dragTimer);
+    const elapsed = Date.now() - touchStartTime;
+
+    if (isDragging) {
+      endDrag(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+    } else if (elapsed < 250) {
+      handleTap(slot);
+    }
+    isDragging = false;
+    touchHandled = true;
+    setTimeout(() => { touchHandled = false; }, 300);
+  });
+
+  // --- Mouse fallback (for desktop testing) ---
+  zone.addEventListener('click', () => {
+    if (touchHandled) return;
+    handleTap(slot);
+  });
+}
+
+let pendingSlot = -1; // slot waiting for single photo upload
+let toastTimer = null;
+
+function showToast(msg) {
+  // Remove existing toast
+  const old = document.getElementById('toast');
+  if (old) old.remove();
+  clearTimeout(toastTimer);
+
+  const el = document.createElement('div');
+  el.id = 'toast';
+  el.className = 'toast bg-gray-800/95 backdrop-blur-sm text-white text-sm px-5 py-2.5 rounded-full shadow-lg border border-gold-500/30';
+  el.style.bottom = '100px';
+  el.textContent = msg;
+  document.body.appendChild(el);
+
+  toastTimer = setTimeout(() => {
+    el.classList.add('hide');
+    setTimeout(() => el.remove(), 250);
+  }, 2000);
+}
+
+function handleTap(slot) {
+  // Empty slot: open file picker for this slot
+  if (!photos[slot]) {
+    if (selectedSlot !== -1) {
+      // If another photo is selected, move it here
+      swapPhotos(selectedSlot, slot);
+      document.getElementById(`slot-${selectedSlot}`).classList.remove('selected');
+      selectedSlot = -1;
+    } else {
+      pendingSlot = slot;
+      document.getElementById('single-file-input').click();
+    }
+    return;
+  }
+
+  // Photo exists: select/deselect/swap
+  if (selectedSlot === -1) {
+    selectedSlot = slot;
+    document.getElementById(`slot-${slot}`).classList.add('selected');
+    showToast('이동할 액자를 선택하세요');
+  } else if (selectedSlot === slot) {
+    selectedSlot = -1;
+    document.getElementById(`slot-${slot}`).classList.remove('selected');
+  } else {
+    swapPhotos(selectedSlot, slot);
+    document.getElementById(`slot-${selectedSlot}`).classList.remove('selected');
+    selectedSlot = -1;
+    showToast('사진이 이동했습니다');
+  }
+}
+
+function swapPhotos(a, b) {
+  [photos[a], photos[b]] = [photos[b], photos[a]];
+  [photoURLs[a], photoURLs[b]] = [photoURLs[b], photoURLs[a]];
+  refreshSlot(a);
+  refreshSlot(b);
+}
+
+// ========================================
+// Drag & Drop
+// ========================================
+let dragState = null;
+
+function startDrag(slot, x, y) {
+  dragState = { slot };
+  const ghost = document.getElementById('drag-ghost');
+  ghost.querySelector('img').src = photoURLs[slot];
+  ghost.classList.remove('hidden');
+  ghost.style.left = x + 'px';
+  ghost.style.top = y + 'px';
+
+  // Dim source, highlight targets
+  document.getElementById(`slot-${slot}`).style.opacity = '0.4';
+  for (let i = 0; i < TOTAL_SLOTS; i++) {
+    if (i !== slot) {
+      document.getElementById(`slot-${i}`).classList.add('drop-target');
+    }
+  }
+}
+
+function moveDrag(x, y) {
+  const ghost = document.getElementById('drag-ghost');
+  ghost.style.left = x + 'px';
+  ghost.style.top = y + 'px';
+}
+
+function endDrag(x, y) {
+  const ghost = document.getElementById('drag-ghost');
+  ghost.classList.add('hidden');
+
+  // Find target slot
+  const els = document.elementsFromPoint(x, y);
+  let targetSlot = null;
+  for (const el of els) {
+    if (el.dataset && el.dataset.slot !== undefined) {
+      targetSlot = parseInt(el.dataset.slot);
+      break;
+    }
+  }
+
+  if (targetSlot !== null && targetSlot !== dragState.slot) {
+    swapPhotos(dragState.slot, targetSlot);
+  }
+
+  // Clean up
+  document.getElementById(`slot-${dragState.slot}`).style.opacity = '';
+  for (let i = 0; i < TOTAL_SLOTS; i++) {
+    document.getElementById(`slot-${i}`).classList.remove('drop-target');
+  }
+  dragState = null;
+}
+
+// ========================================
+// Download / Export
+// ========================================
+function drawCoverFit(ctx, img, x, y, w, h) {
+  const iw = img.naturalWidth;
+  const ih = img.naturalHeight;
+  const scale = Math.max(w / iw, h / ih);
+  const sw = w / scale;
+  const sh = h / scale;
+  const sx = (iw - sw) / 2;
+  const sy = (ih - sh) / 2;
+  ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+}
+
+async function downloadAll() {
+  const btn = document.getElementById('download-btn');
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = '저장 중...';
+
+  let slotOffset = 0;
+  for (let fi = 0; fi < FRAMES.length; fi++) {
+    const frame = FRAMES[fi];
+
+    // Check if this page has any photos
+    const pagePhotos = photos.slice(slotOffset, slotOffset + frame.regions.length);
+    if (!pagePhotos.some(p => p !== null)) {
+      slotOffset += frame.regions.length;
+      continue;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = frame.width;
+    canvas.height = frame.height;
+    const ctx = canvas.getContext('2d');
+
+    // White background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw photos
+    for (let i = 0; i < frame.regions.length; i++) {
+      const photo = photos[slotOffset + i];
+      if (!photo) continue;
+      const r = frame.regions[i];
+      drawCoverFit(ctx, photo, r.x, r.y, r.w, r.h);
+    }
+
+    // Draw frame on top
+    ctx.drawImage(frameImages[fi], 0, 0);
+
+    // Download
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `epilogue_album_page${fi + 1}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+
+    slotOffset += frame.regions.length;
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  btn.textContent = origText;
+  btn.disabled = false;
+}
+
+// ========================================
+// Init
+// ========================================
+async function init() {
+  try {
+    // Preload frame images
+    for (const frame of FRAMES) {
+      const img = await loadImage(frame.src);
+      frameImages.push(img);
+    }
+
+    renderAlbum();
+
+    // Event listeners
+    document.getElementById('upload-btn').addEventListener('click', () => {
+      document.getElementById('file-input').click();
+    });
+
+    document.getElementById('file-input').addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        handleUpload(e.target.files);
+      }
+      e.target.value = '';
+    });
+
+    // Tap outside frames to deselect
+    document.addEventListener('click', (e) => {
+      if (selectedSlot === -1) return;
+      if (e.target.closest('.frame-zone')) return;
+      document.getElementById(`slot-${selectedSlot}`).classList.remove('selected');
+      selectedSlot = -1;
+    });
+
+    document.getElementById('download-btn').addEventListener('click', downloadAll);
+
+    // Single file upload for individual slot
+    document.getElementById('single-file-input').addEventListener('change', async (e) => {
+      if (e.target.files.length > 0 && pendingSlot >= 0) {
+        try {
+          const { img, url } = await loadImageFromFile(e.target.files[0]);
+          photos[pendingSlot] = img;
+          photoURLs[pendingSlot] = url;
+          refreshSlot(pendingSlot);
+          updateDownloadBtn();
+          document.getElementById('hint-text').classList.remove('hidden');
+        } catch (err) {
+          console.error('Failed to load:', err);
+        }
+        pendingSlot = -1;
+      }
+      e.target.value = '';
+    });
+
+  } catch (err) {
+    console.error('Init failed:', err);
+    document.getElementById('album').innerHTML =
+      `<p class="text-center text-red-400 py-20">로딩 실패. 서버를 확인해주세요.</p>`;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
